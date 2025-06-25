@@ -22,4 +22,8 @@ How to Run the Project:
 3. Now run the command docker-compose up --build
 4. Open a New Terminal and run the client script by using the command python3 src/client.py
 
+Screenshots displaying the online nodes and outputs
+![image](https://github.com/user-attachments/assets/430ec26d-2cd7-4af2-a8e3-758ef01b3f59)
+![image](https://github.com/user-attachments/assets/f664d914-b30c-4d12-9f69-962c64fbee84)
+
 
