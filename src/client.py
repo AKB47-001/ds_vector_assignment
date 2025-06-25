@@ -20,7 +20,7 @@ def get(node, key):
 
 # SIMULATING THE CASUAL SCENARIO
 print("---- Step_1: Node One writes x=A ----")
-put("node1", "x", "A", {"node1": 1, "node2": 0, "node3": 0}, "node1")
+put("node1", "x", "Alpha", {"node1": 1, "node2": 0, "node3": 0}, "node1")
 time.sleep(1)
 
 print("---- Step_2: Node Two reads x ----")
@@ -28,7 +28,7 @@ get("node2", "x")
 time.sleep(1)
 
 print("---- Step_3: Node Two writes x=B ----")
-put("node2", "x", "B", {"node1": 1, "node2": 1, "node3": 0}, "node2")
+put("node2", "x", "Beta", {"node1": 1, "node2": 1, "node3": 0}, "node2")
 time.sleep(1)
 
 print("---- Step_4: Node Three reads x ----")
