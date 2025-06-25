@@ -1,101 +1,96 @@
-# src/node.py
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import threading
-import requests
 import time
-import json
-import os
+import sys
+
+class VectorClock:
+    def __init__(self, node_id, all_nodes):
+        self.clock = {nid: 0 for nid in all_nodes}
+        self.node_id = node_id
+
+    def increment(self):
+        self.clock[self.node_id] += 1
+
+    def update(self, received_clock):
+        for node, val in received_clock.items():
+            self.clock[node] = max(self.clock.get(node, 0), val)
+
+    def is_causally_ready(self, received_clock, sender_id):
+        for node in self.clock:
+            if node == sender_id:
+                if received_clock[node] != self.clock[node] + 1:
+                    return False
+            else:
+                if received_clock[node] > self.clock[node]:
+                    return False
+        return True
+
+    def get_clock(self):
+        return self.clock.copy()
 
 app = Flask(__name__)
+store = {}          
+buffer = []          
+node_id = None       
+vector_clock = None  
+all_nodes = []       
 
-# Setup
-NODE_ID = int(os.environ['NODE_ID'])          # e.g., 0, 1, 2
-TOTAL_NODES = int(os.environ['TOTAL_NODES'])  # e.g., 3
-PORT = int(os.environ['PORT'])                # e.g., 5000, 5001, 5002
+@app.route('/')
+def index():
+    return f"Node {node_id} is running with clock: {vector_clock.clock}", 200
 
-# State
-store = {}  # key-value data
-vector_clock = [0] * TOTAL_NODES
-message_buffer = []
-lock = threading.Lock()
-
-# Utility Functions
-def increment_clock():
-    vector_clock[NODE_ID] += 1
-
-def send_update_to_peers(key, value):
-    payload = {
-        'key': key,
-        'value': value,
-        'clock': vector_clock.copy()
-    }
-    for i in range(TOTAL_NODES):
-        if i != NODE_ID:
-            try:
-                requests.post(f"http://node{i}:{5000+i}/replicate", json=payload)
-            except Exception as e:
-                print(f"[ERROR] Could not send to node{i}: {e}")
-
-def can_deliver(received_clock):
-    for i in range(TOTAL_NODES):
-        if i == received_clock['from']:
-            if received_clock['clock'][i] != vector_clock[i] + 1:
-                return False
-        else:
-            if received_clock['clock'][i] > vector_clock[i]:
-                return False
-    return True
-
-def apply_buffered_messages():
-    global message_buffer
-    to_process = []
-    for msg in message_buffer:
-        if can_deliver({'clock': msg['clock'], 'from': msg['from']}):
-            to_process.append(msg)
-
-    for msg in to_process:
-        message_buffer.remove(msg)
-        process_replication(msg)
-
-# API Routes
 @app.route('/put', methods=['POST'])
 def put():
-    data = request.json
+    global store, vector_clock
+    data = request.get_json()
     key = data['key']
     value = data['value']
-    with lock:
-        increment_clock()
-        store[key] = value
-        send_update_to_peers(key, value)
-    return jsonify({'status': 'PUT accepted', 'clock': vector_clock})
+    received_clock = data['clock']
+    sender_id = data['sender']
 
-@app.route('/get/<key>', methods=['GET'])
-def get(key):
-    with lock:
-        value = store.get(key, None)
-    return jsonify({'key': key, 'value': value, 'clock': vector_clock})
+    if vector_clock.is_causally_ready(received_clock, sender_id):
+        store[key] = value
+        vector_clock.update(received_clock)
+        print(f"[{node_id}] Applied write: {key}={value}, clock={vector_clock.clock}")
+        return {'status': 'applied'}
+    else:
+        buffer.append(data)
+        print(f"[{node_id}] Buffered write: {key}={value} from {sender_id}")
+        return {'status': 'buffered'}
+
+@app.route('/get', methods=['GET'])
+def get():
+    key = request.args.get('key')
+    value = store.get(key, None)
+    print(f"[{node_id}] GET {key}={value}")
+    return {'value': value}
 
 @app.route('/replicate', methods=['POST'])
 def replicate():
-    data = request.json
-    key = data['key']
-    value = data['value']
-    clock = data['clock']
-    msg = {'key': key, 'value': value, 'clock': clock, 'from': clock.index(max(clock))}
-    with lock:
-        if can_deliver(msg):
-            process_replication(msg)
-            apply_buffered_messages()
-        else:
-            message_buffer.append(msg)
-    return jsonify({'status': 'Buffered or applied'})
+    return put()
 
-def process_replication(msg):
-    store[msg['key']] = msg['value']
-    for i in range(TOTAL_NODES):
-        vector_clock[i] = max(vector_clock[i], msg['clock'][i])
-    print(f"[Node {NODE_ID}] Applied update {msg}")
+def process_buffer():
+    global buffer
+    while True:
+        time.sleep(0.5)
+        for entry in buffer[:]:  
+            if vector_clock.is_causally_ready(entry['clock'], entry['sender']):
+                store[entry['key']] = entry['value']
+                vector_clock.update(entry['clock'])
+                buffer.remove(entry)
+                print(f"[{node_id}] Buffered write applied: {entry['key']}={entry['value']}")
 
-# Run
+def start_node(my_id, node_list):
+    global node_id, all_nodes, vector_clock
+    node_id = my_id
+    all_nodes = node_list
+    vector_clock = VectorClock(node_id, all_nodes)
+
+    print(f"[{node_id}] Node started with clock: {vector_clock.clock}")
+    threading.Thread(target=process_buffer, daemon=True).start()
+    app.run(host='0.0.0.0', port=7000)
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)
+    my_node_id = sys.argv[1]            
+    node_ids = sys.argv[2].split(',')   
+    start_node(my_node_id, node_ids)

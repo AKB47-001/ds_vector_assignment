@@ -1,45 +1,35 @@
-# src/client.py
-
 import requests
 import time
 
-NODES = {
-    0: "http://localhost:5000",
-    1: "http://localhost:5001",
-    2: "http://localhost:5002"
+nodes = {
+    "node1": "http://localhost:7001",
+    "node2": "http://localhost:7002",
+    "node3": "http://localhost:7003",
 }
 
-def put(node, key, value):
-    print(f"[Client] PUT '{key}'='{value}' to Node {node}")
-    res = requests.post(f"{NODES[node]}/put", json={"key": key, "value": value})
-    print(f"  Response: {res.json()}\n")
+def put(node, key, value, clock, sender):
+    url = f"{nodes[node]}/replicate"
+    data = {"key": key, "value": value, "clock": clock, "sender": sender}
+    res = requests.post(url, json=data)
+    print(f"PUT to {node}: {res.json()}")
 
 def get(node, key):
-    print(f"[Client] GET '{key}' from Node {node}")
-    res = requests.get(f"{NODES[node]}/get/{key}")
-    print(f"  Response: {res.json()}\n")
-    return res.json()
+    url = f"{nodes[node]}/get?key={key}"  
+    res = requests.get(url)
+    print(f"GET from {node}: {res.json()}")
 
-def scenario_causal_consistency():
-    print("\n--- Scenario: Causal Consistency Test ---\n")
+# SIMULATING THE CASUAL SCENARIO
+print("---- Step_1: Node One writes x=A ----")
+put("node1", "x", "A", {"node1": 1, "node2": 0, "node3": 0}, "node1")
+time.sleep(1)
 
-    # Step 1: Write x=apple to node 0
-    put(0, "x", "apple")
+print("---- Step_2: Node Two reads x ----")
+get("node2", "x")
+time.sleep(1)
 
-    time.sleep(1)  # Give time for propagation
+print("---- Step_3: Node Two writes x=B ----")
+put("node2", "x", "B", {"node1": 1, "node2": 1, "node3": 0}, "node2")
+time.sleep(1)
 
-    # Step 2: Read x from node 1 (establish causal dependency)
-    x_val = get(1, "x")  # Should return 'apple'
-
-    time.sleep(1)
-
-    # Step 3: Write x=banana to node 1 (causally dependent on prior read)
-    put(1, "x", "banana")
-
-    time.sleep(1.5)
-
-    # Step 4: Read x from node 2 (should eventually return 'banana' only after 'apple')
-    get(2, "x")
-
-if __name__ == "__main__":
-    scenario_causal_consistency()
+print("---- Step_4: Node Three reads x ----")
+get("node3", "x")
